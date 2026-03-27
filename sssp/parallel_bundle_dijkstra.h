@@ -1,0 +1,65 @@
+//
+// Created by Jeremy Ng on 3/23/26.
+//
+
+#ifndef SENIORTHESIS_PARALLEL_BUNDLE_DIJKSTRA_H
+#define SENIORTHESIS_PARALLEL_BUNDLE_DIJKSTRA_H
+
+#include <algorithm>
+#include <queue>
+#include <unordered_set>
+#include <vector>
+#include <random>
+#include <cstdint>
+#include <optional>
+
+#include <parlay/primitives.h>
+#include <parlay/sequence.h>
+
+#include "../parallel_types.h"
+#include "sssp_solver.h"
+
+class ParallelBundleDijkstraSolver : public SSSPSolver {
+private:
+    using BoolSeq = parlay::sequence<bool>;
+
+    // Final SSSP result
+    std::vector<Distance> dist_s;
+
+    // Bundle construction
+    VertexSeq R_vertices;                 // compact list of representatives
+    parlay::sequence<uint8_t> in_R;       // membership bitmap
+
+    NestDist local_dist;                  // local_dist[v] = [(u, d(v,u)), ...]
+    NestV bundle;
+    NestV ball;
+    VertexSeq b;
+
+public:
+    // Bundle Construction and Bundle Relaxation
+    ~ParallelBundleDijkstraSolver() override = default;
+
+    void construct(const Graph& g, Vertex source);
+    void relax(Vertex v, Distance d, std::priority_queue<PQNode, std::vector<PQNode>, std::greater<>> &pq);
+
+    void solve(const Graph& g, Vertex source) override;
+
+    const std::vector<Distance>& distances() const override {
+        return dist_s;
+    }
+
+    const char* name() const override {
+        return "Parallel Bundle Dijkstra";
+    }
+
+    std::optional<Distance> find_dist(Vertex from, Vertex to) const {
+        for (const auto& [u, d] : local_dist[from]) {
+            if (u == to) {
+                return d;
+            }
+        }
+        return std::nullopt;
+    }
+};
+
+#endif //SENIORTHESIS_PARALLEL_BUNDLE_DIJKSTRA_H

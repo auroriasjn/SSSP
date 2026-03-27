@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="SshConfigs">
+    <configs>
+      <sshConfig authType="OPEN_SSH" host="bouchet.ycrc.yale.edu" id="46aa921d-fe23-42a1-bfca-4e3d62f9df05" port="22" nameFormat="DESCRIPTIVE" username="jen55" useOpenSSHConfig="true" />
+    </configs>
+  </component>
+</project>
