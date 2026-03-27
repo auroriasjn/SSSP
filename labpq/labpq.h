@@ -6,6 +6,7 @@
 #define SENIORTHESIS_LABPQ_H
 
 #include "../types.h"
+#include "../parallel_types.h"
 
 #include <parlay/primitives.h>
 #include <parlay/sequence.h>
@@ -13,9 +14,6 @@
 
 class LaBPQ {
 public:
-    using VertexSeq = parlay::sequence<Vertex>;
-    using DistSeq   = parlay::sequence<std::atomic<Distance>>;
-
     virtual ~LaBPQ() = default;
 
     virtual void update(Vertex v) = 0;

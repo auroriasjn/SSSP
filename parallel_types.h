@@ -10,6 +10,7 @@
 #include "types.h"
 
 using VertexSeq = parlay::sequence<Vertex>;
+using DistSeq = parlay::sequence<std::atomic<Distance>>;
 using DistPair = std::pair<Vertex, Distance>;
 using DistMapSeq = parlay::sequence<DistPair>;
 using NestV = parlay::sequence<VertexSeq>;

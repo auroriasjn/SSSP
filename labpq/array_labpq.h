@@ -8,8 +8,10 @@
 #include <parlay/primitives.h>
 #include <parlay/sequence.h>
 
+#include "../parallel_types.h"
 #include "../graph.h"
 #include "../sssp/sssp_solver.h"
+#include "../utils.h"
 
 #ifndef NDEBUG
 #define DBG(x) do { x; } while (0)
@@ -18,17 +20,15 @@
 #endif
 
 class ArrayLaBPQ {
-public:
-    using DistAtomSeq = parlay::sequence<std::atomic<Distance>>;
-    using VertexSeq   = parlay::sequence<Vertex>;
-
 private:
-    DistAtomSeq* delta_;                          // authoritative distances
+    DistSeq* delta_;                          // authoritative distances
     parlay::sequence<std::atomic<bool>> in_q_;   // membership flags
     std::atomic<std::size_t> active_count_{0};
 
+    uint32_t seed_ = 0;
+
 public:
-    explicit ArrayLaBPQ(DistAtomSeq& delta)
+    explicit ArrayLaBPQ(DistSeq& delta)
             : delta_(&delta), in_q_(delta.size()) {
         parlay::parallel_for(0, in_q_.size(), [&](std::size_t i) {
             in_q_[i].store(false, std::memory_order_relaxed);
@@ -84,6 +84,7 @@ public:
         return out;
     }
 
+
     // Snapshot all currently active vertices without removing them.
     VertexSeq active_vertices() const {
         auto ids = parlay::tabulate(in_q_.size(), [](std::size_t i) {
@@ -93,5 +94,39 @@ public:
         return parlay::filter(ids, [&](Vertex v) {
             return in_q_[v].load(std::memory_order_acquire);
         });
+    }
+
+    // Get the threshold
+    Distance get_threshold(const VertexSeq& frontier, const DistSeq& dist_a, const size_t k) {
+        constexpr std::size_t SSSP_SAMPLES = 1000;
+        const std::size_t frontier_size = frontier.size();
+
+        if (frontier_size == 0) {
+            return INF;
+        }
+
+        if (frontier_size <= k) {
+            DBG(std::cerr << "[get_threshold] frontier size less than rho.\n";);
+            auto frontier_dist = parlay::delayed_tabulate(frontier_size, [&](std::size_t i) {
+                return dist_a[frontier[i]].load(std::memory_order_relaxed);
+            });
+            return *parlay::max_element(frontier_dist);
+        }
+
+        std::array<Distance, SSSP_SAMPLES + 1> sample_dist{};
+        for (std::size_t i = 0; i <= SSSP_SAMPLES; ++i) {
+            Vertex v = frontier[hash_value(seed_ + static_cast<uint32_t>(i)) % frontier_size];
+            sample_dist[i] = dist_a[v].load(std::memory_order_relaxed);
+        }
+
+        seed_ += static_cast<uint32_t>(SSSP_SAMPLES + 1);
+
+        auto id = static_cast<std::size_t>(
+                (static_cast<double>(k) / static_cast<double>(frontier_size)) * SSSP_SAMPLES
+        );
+        if (id > SSSP_SAMPLES) id = SSSP_SAMPLES;
+
+        std::sort(sample_dist.begin(), sample_dist.end());
+        return sample_dist[id];
     }
 };

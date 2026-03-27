@@ -12,39 +12,6 @@
 #define DBG(x) do {} while (0)
 #endif
 
-Distance RhoSteppingSolver::get_threshold(const VertexSeq& frontier, const DistSeq& dist_a) {
-    constexpr std::size_t SSSP_SAMPLES = 1000;
-    const std::size_t frontier_size = frontier.size();
-
-    if (frontier_size == 0) {
-        return INF;
-    }
-
-    if (frontier_size <= rho_) {
-        DBG(std::cerr << "[get_threshold] frontier size less than rho.\n";);
-        auto frontier_dist = parlay::delayed_tabulate(frontier_size, [&](std::size_t i) {
-            return dist_a[frontier[i]].load(std::memory_order_relaxed);
-        });
-        return *parlay::max_element(frontier_dist);
-    }
-
-    std::array<Distance, SSSP_SAMPLES + 1> sample_dist{};
-    for (std::size_t i = 0; i <= SSSP_SAMPLES; ++i) {
-        Vertex v = frontier[hash_value(seed_ + static_cast<uint32_t>(i)) % frontier_size];
-        sample_dist[i] = dist_a[v].load(std::memory_order_relaxed);
-    }
-
-    seed_ += static_cast<uint32_t>(SSSP_SAMPLES + 1);
-
-    std::size_t id = static_cast<std::size_t>(
-            (static_cast<double>(rho_) / static_cast<double>(frontier_size)) * SSSP_SAMPLES
-    );
-    if (id > SSSP_SAMPLES) id = SSSP_SAMPLES;
-
-    std::sort(sample_dist.begin(), sample_dist.end());
-    return sample_dist[id];
-}
-
 void RhoSteppingSolver::solve(const Graph& g, Vertex source) {
     const size_t n = g.num_vertices();
 
@@ -71,7 +38,7 @@ void RhoSteppingSolver::solve(const Graph& g, Vertex source) {
         }
 
         // Compute rho-threshold from current active frontier
-        Distance theta = get_threshold(active, dist_a);
+        Distance theta = pq.get_threshold(active, dist_a, rho_);
         DBG(std::cerr << "[solve] Current threshold: " << theta << "\n";);
 
         // Extract everything with key <= theta

@@ -25,4 +25,5 @@ add_executable(SeniorThesis sssp.cpp
         labpq/array_labpq.h
         utils.h
         sssp/parallel_bundle_dijkstra.cpp
-        parallel_types.h)
+        parallel_types.h
+        sssp/parallel_bundle_dijkstra.cpp)

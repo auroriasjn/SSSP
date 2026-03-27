@@ -16,20 +16,16 @@
 #include <parlay/delayed.h>
 
 #include "sssp_solver.h"
+#include "../parallel_types.h"
 #include "../labpq/array_labpq.h"
 
 class Graph;
 
 class RhoSteppingSolver : public SSSPSolver {
 private:
-    using VertexSeq = parlay::sequence<Vertex>;
-    using DistSeq = parlay::sequence<std::atomic<Distance>>;
-
     std::vector<Distance> dist;
     std::size_t rho_ = 1 << 20;
     uint32_t seed_ = 0;
-
-    Distance get_threshold(const VertexSeq& frontier, const DistSeq& dist_a);
 
 public:
     explicit RhoSteppingSolver(std::size_t rho = (1u << 20)) : rho_(rho) {}

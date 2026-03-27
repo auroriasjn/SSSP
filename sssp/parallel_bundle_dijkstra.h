@@ -17,6 +17,7 @@
 #include <parlay/sequence.h>
 
 #include "../parallel_types.h"
+#include "../labpq/array_labpq.h"
 #include "sssp_solver.h"
 
 class ParallelBundleDijkstraSolver : public SSSPSolver {
@@ -24,7 +25,7 @@ private:
     using BoolSeq = parlay::sequence<bool>;
 
     // Final SSSP result
-    std::vector<Distance> dist_s;
+    std::vector<Distance> dist;
 
     // Bundle construction
     VertexSeq R_vertices;                 // compact list of representatives
@@ -40,12 +41,18 @@ public:
     ~ParallelBundleDijkstraSolver() override = default;
 
     void construct(const Graph& g, Vertex source);
-    void relax(Vertex v, Distance d, std::priority_queue<PQNode, std::vector<PQNode>, std::greater<>> &pq);
+
+    void relax(
+            Vertex v,
+            Distance cand,
+            ArrayLaBPQ& pq,
+            DistSeq& dist_a
+    );
 
     void solve(const Graph& g, Vertex source) override;
 
     const std::vector<Distance>& distances() const override {
-        return dist_s;
+        return dist;
     }
 
     const char* name() const override {

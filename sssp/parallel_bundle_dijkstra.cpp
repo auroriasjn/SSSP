@@ -31,20 +31,24 @@ namespace {
         x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
         return x ^ (x >> 31);
     }
+
+    inline size_t get_k(size_t n) {
+        // Base case
+        if (n <= 2) return 1;
+
+        // k logic
+        const double ln_n = std::log(static_cast<double>(n));
+        const double ln_ln_n = std::log(std::max(2.0, ln_n));
+        const double val = std::sqrt(ln_n / ln_ln_n);
+        return std::max<size_t>(1, static_cast<size_t>(std::ceil(val)));
+    }
 }
 
 void ParallelBundleDijkstraSolver::construct(const Graph& g, Vertex source) {
     const size_t n = g.num_vertices();
 
     // Same k as sequential version
-    size_t k = 1;
-    if (n > 2) {
-        const double ln_n = std::log(static_cast<double>(n));
-        const double ln_ln_n = std::log(std::max(2.0, ln_n));
-        const double val = std::sqrt(ln_n / ln_ln_n);
-        k = std::max<size_t>(1, static_cast<size_t>(std::ceil(val)));
-    }
-
+    size_t k = get_k(n);
     const size_t L = std::max<size_t>(
             1,
             static_cast<size_t>(std::ceil(k * std::log(std::max<size_t>(2, k))))
@@ -65,8 +69,8 @@ void ParallelBundleDijkstraSolver::construct(const Graph& g, Vertex source) {
     b = VertexSeq(n, Vertex(-1));
     local_dist = NestDist(n);
 
-    dist_s.assign(n, INF);
-    dist_s[source] = 0;
+    dist.assign(n, INF);
+    dist[source] = 0;
 
     // Temporary per-vertex results from truncated Dijkstra
     NestV extracted(n);
@@ -82,10 +86,6 @@ void ParallelBundleDijkstraSolver::construct(const Graph& g, Vertex source) {
         if (v == source || x < p) {
             in_R1[v] = 1;
         }
-    });
-
-    VertexSeq R1_vertices = parlay::filter(verts, [&](Vertex v) {
-        return in_R1[v];
     });
 
     // ---- Phase 2: truncated Dijkstra from each v not in R1 ----
@@ -174,10 +174,9 @@ void ParallelBundleDijkstraSolver::construct(const Graph& g, Vertex source) {
         std::vector<std::pair<Vertex, Distance>> ldv;
 
         bool found_rep = false;
-
         for (size_t j = 0; j < ext.size(); ++j) {
             Vertex u = ext[j];
-            Distance du = td[j].second;  // same traversal order as ext
+            Distance du = td[j].second;
 
             if (in_R[u]) {
                 b[v] = u;
@@ -189,14 +188,6 @@ void ParallelBundleDijkstraSolver::construct(const Graph& g, Vertex source) {
             bv.push_back(u);
             ldv.emplace_back(u, du);
         }
-
-        if (!found_rep) {
-#ifndef NDEBUG
-            std::cerr << "[construct] No representative found for v=" << v << "\n";
-            std::abort();
-#endif
-        }
-
         ball[v] = VertexSeq(bv.begin(), bv.end());
         local_dist[v] = DistMapSeq(ldv.begin(), ldv.end());
     });
@@ -205,7 +196,6 @@ void ParallelBundleDijkstraSolver::construct(const Graph& g, Vertex source) {
     auto nonR_vertices = parlay::filter(verts, [&](Vertex v) {
         return !in_R[v];
     });
-
     auto assign_pairs = parlay::map(nonR_vertices, [&](Vertex v) {
         return std::pair<size_t, Vertex>(static_cast<size_t>(b[v]), v);
     });
@@ -231,319 +221,158 @@ void ParallelBundleDijkstraSolver::construct(const Graph& g, Vertex source) {
 
 void ParallelBundleDijkstraSolver::relax(
         Vertex v,
-        Distance D,
-        std::priority_queue<PQNode, std::vector<PQNode>, std::greater<>>& pq
+        Distance cand,
+        ArrayLaBPQ& pq,
+        DistSeq& dist_a
 ) {
-    // TODO: FIX THIS
     DBG(std::cerr << "[relax] enter v=" << v
-                  << " D=" << D
-                  << " dist_s[v]=" << dist_s[v] << "\n";);
+                  << " cand=" << cand << "\n";);
 
-    if (D >= dist_s[v]) {
-        DBG(std::cerr << "[relax] skip (no improvement) v=" << v << "\n";);
+    Distance old = dist_a[v].load(std::memory_order_relaxed);
+    bool improved = false;
+
+    while (cand < old) {
+        if (dist_a[v].compare_exchange_weak(
+                old, cand,
+                std::memory_order_acq_rel,
+                std::memory_order_relaxed)) {
+            improved = true;
+            break;
+        }
+    }
+
+    if (!improved) {
+        DBG(std::cerr << "[relax] no improvement for v=" << v
+                      << " old=" << old << "\n";);
         return;
     }
 
-    dist_s[v] = D;
+    DBG(std::cerr << "[relax] improved v=" << v
+                  << " new=" << cand << "\n";);
 
-    DBG(std::cerr << "[relax] updated dist_s[" << v << "] = " << D << "\n";);
-
-    // Case 1: v ∈ R
     if (in_R[v]) {
-        DBG(std::cerr << "[relax] v in R -> push to pq: ("
-                      << D << ", " << v << ")\n";);
-        pq.emplace(D, v);
+        pq.update(v);
         return;
     }
 
-    // Case 2: v ∉ R, propagate to representative/root
+    // Optional recursive representative notification.
     const Vertex root = b[v];
+    if (is_invalid_vertex(root)) return;
 
-    DBG(std::cerr << "[relax] v not in R, root=" << root << "\n";);
+    auto dv_root = find_dist(v, root);
+    if (!dv_root.has_value()) return;
 
-    if (is_invalid_vertex(root)) {
-        DBG(std::cerr << "[relax] WARNING: invalid root for v=" << v << "\n";);
-        return;
-    }
+    const Distance rep_cand = cand + *dv_root;
 
-    auto delta = find_dist(v, root);
-    if (!delta.has_value()) {
-        DBG(std::cerr << "[relax] WARNING: no local_dist entry for v="
-                      << v << " root=" << root << "\n";);
-        return;
-    }
-
-    const Distance nextD = D + *delta;
-
-    DBG(std::cerr << "[relax] propagate -> root=" << root
-                  << " edge=" << *delta
-                  << " nextD=" << nextD << "\n";);
-
-    relax(root, nextD, pq);
+    // Only keep this if your theory really justifies it.
+    relax(root, rep_cand, pq, dist_a);
 }
 
 void ParallelBundleDijkstraSolver::solve(const Graph& g, Vertex source) {
-    const size_t n = g.num_vertices();
-
-#ifndef NDEBUG
-#define DBG(x) do { x; } while (0)
-#else
-#define DBG(x) do {} while (0)
-#endif
-    // Step 1 of bundle construction
+    const std::size_t n = g.num_vertices();
     construct(g, source);
 
-    DBG(std::cerr << "[solve] source in R? " << R.count(source) << "\n";);
-    DBG(std::cerr << "[solve] bundle[source].size()=" << bundle[source].size() << "\n";);
-    DBG(std::cerr << "[solve] source_in_bundle[source]? "
-                  << (std::find(bundle[source].begin(), bundle[source].end(), source) != bundle[source].end())
-                  << "\n";);
+    dist.assign(n, INF);
 
-    dist_s.assign(n, INF);
-    dist_s[source] = static_cast<Distance>(0);
+    DistSeq dist_a(n);
+    parlay::parallel_for(0, n, [&](std::size_t i) {
+        dist_a[i].store(INF, std::memory_order_relaxed);
+    });
+    dist_a[source].store(0, std::memory_order_relaxed);
 
-    DBG(std::cerr << "[solve] source=" << source
-                  << " in R? " << R.count(source)
-                  << " bundle[source].size()=" << bundle[source].size()
-                  << " source_in_own_bundle? "
-                  << std::count(bundle[source].begin(), bundle[source].end(), source)
-                  << "\n";);
+    ArrayLaBPQ pq(dist_a);
+    const std::size_t batch_size = get_k(n);
 
-    std::priority_queue<PQNode, std::vector<PQNode>, std::greater<>> pq;
-
-#ifndef NDEBUG
-    std::vector<size_t> pop_count(n, 0);
-    std::vector<size_t> relax_count(n, 0);
-
-    DBG(std::cerr << "[solve] source=" << source
-                  << " n=" << n
-                  << " |R|=" << R.size() << "\n";);
-#endif
-
-    // Algorithm 1 initializes the heap with all vertices of R, keyed by d(.)
-    for (auto u: R) {
-        pq.emplace(dist_s[u], u);  // source gets 0, others get INF
-        DBG(std::cerr << "[solve] initial pq push u=" << u
-                      << " key=" << dist_s[u] << "\n";);
-    }
+    // Match reference semantics: all representatives are active initially.
+    parlay::parallel_for(0, R_vertices.size(), [&](std::size_t i) {
+        pq.update(R_vertices[i]);
+    });
 
     while (!pq.empty()) {
-        auto [du, u] = pq.top();
-        pq.pop();
+        VertexSeq active = pq.active_vertices();
+        if (active.empty()) break;
 
-#ifndef NDEBUG
-        pop_count[u]++;
-        DBG(std::cerr << "\n[solve] pop u=" << u
-                      << " du=" << du
-                      << " dist_s[u]=" << dist_s[u]
-                      << " pq_size=" << pq.size()
-                      << " pop_count=" << pop_count[u] << "\n";);
-#endif
+        const Distance theta = pq.get_threshold(active, dist_a, batch_size);
+        VertexSeq frontier = pq.extract(theta);
+        if (frontier.empty()) break;
 
-        // Skip stale heap entries.
-        if (du != dist_s[u]) {
-            DBG(std::cerr << "[solve] stale pop, skip u=" << u << "\n";);
-            continue;
-        }
+        parlay::parallel_for(0, frontier.size(), [&](std::size_t i) {
+            const Vertex u = frontier[i];
+            const Distance du = dist_a[u].load(std::memory_order_relaxed);
+            if (du == INF) return;
 
-        if (du == INF) {
-            DBG(std::cerr << "[solve] infinite pop, skip u=" << u << "\n";);
-            break;
-        }
+            const VertexSeq& owned = bundle[u];
 
-        // Only R-vertices should drive the main loop.
-        if (!R.count(u)) {
-            DBG(std::cerr << "[solve] WARNING: popped non-R vertex u=" << u << "\n";);
-            continue;
-        }
+            // Step 1
+            parlay::parallel_for(0, owned.size(), [&](std::size_t j) {
+                const Vertex v = owned[j];
 
-        DBG(std::cerr << "[solve] process u=" << u
-                      << " bundle[u].size()=" << bundle[u].size() << "\n";);
-
-        // -------------------------
-        // Step 1
-        // -------------------------
-        for (Vertex v: bundle[u]) {
-            DBG(std::cerr << "[solve][step1] bundle root u=" << u
-                          << " visiting v=" << v
-                          << " ball[v].size()=" << ball[v].size()
-                          << " dist_s[v]=" << dist_s[v] << "\n";);
-
-            // Relax(v, d(u) + dist(u,v))
-            {
-                auto it_uv = local_dist[v].find(u); // dist(v,u) = dist(u,v)
-                if (it_uv != local_dist[v].end() && dist_s[u] < INF) {
-                    Distance cand = dist_s[u] + it_uv->second;
-#ifndef NDEBUG
-                    relax_count[v]++;
-#endif
-                    DBG(std::cerr << "[solve][step1] direct from u: relax("
-                                  << v << ", " << cand << ")"
-                                  << " via local_dist[" << v << "][" << u << "]="
-                                  << it_uv->second << "\n";);
-                    relax(v, cand, pq);
+                if (v == u) {
+                    relax(v, du, pq, dist_a);
                 } else {
-                    DBG(std::cerr << "[solve][step1] skip direct from u for v=" << v
-                                  << " reason="
-                                  << (it_uv == local_dist[v].end() ? "missing local_dist " : "")
-                                  << (dist_s[u] >= INF ? "dist_s[u]=INF" : "")
-                                  << "\n";);
-                }
-            }
-
-            // For y in Ball(v): Relax(v, d(y) + dist(y,v))
-            for (Vertex y: ball[v]) {
-                auto it_vy = local_dist[v].find(y);
-                if (it_vy != local_dist[v].end() && dist_s[y] < INF) {
-                    Distance cand = dist_s[y] + it_vy->second;
-#ifndef NDEBUG
-                    relax_count[v]++;
-#endif
-                    DBG(std::cerr << "[solve][step1] from ball y=" << y
-                                  << " -> relax(" << v << ", " << cand << ")"
-                                  << " with dist_s[y]=" << dist_s[y]
-                                  << " local_dist[" << v << "][" << y << "]="
-                                  << it_vy->second << "\n";);
-                    relax(v, cand, pq);
-                } else {
-                    DBG(std::cerr << "[solve][step1] skip ball y=" << y
-                                  << " for v=" << v
-                                  << " reason="
-                                  << (it_vy == local_dist[v].end() ? "missing local_dist " : "")
-                                  << (dist_s[y] >= INF ? "dist_s[y]=INF" : "")
-                                  << "\n";);
-                }
-            }
-
-            // For z2 in Ball(v) U {v}, for z1 in N(z2):
-            // Relax(v, d(z1) + w(z1,z2) + dist(z2,v))
-            auto relax_from_z2 = [&](Vertex z2) {
-                auto dist_z2_to_v = static_cast<Distance>(0);
-
-                if (z2 != v) {
-                    auto it = local_dist[v].find(z2);
-                    if (it == local_dist[v].end()) {
-                        DBG(std::cerr << "[solve][step1] WARNING: missing local_dist["
-                                      << v << "][" << z2 << "]\n";);
-                        return;
-                    }
-                    dist_z2_to_v = it->second;
-                }
-
-                DBG(std::cerr << "[solve][step1] relax_from_z2 z2=" << z2
-                              << " -> v=" << v
-                              << " dist_z2_to_v=" << dist_z2_to_v
-                              << " deg(z2)=" << g.neighbors(z2).size() << "\n";);
-
-                for (const auto &edge: g.neighbors(z2)) {
-                    const Vertex z1 = edge.to;
-                    if (dist_s[z1] < INF) {
-                        Distance cand = dist_s[z1] + edge.weight + dist_z2_to_v;
-#ifndef NDEBUG
-                        relax_count[v]++;
-#endif
-                        DBG(std::cerr << "[solve][step1] z1=" << z1
-                                      << " z2=" << z2
-                                      << " -> relax(" << v << ", " << cand << ")"
-                                      << " with dist_s[z1]=" << dist_s[z1]
-                                      << " w=" << edge.weight
-                                      << " dist(z2,v)=" << dist_z2_to_v << "\n";);
-                        relax(v, cand, pq);
-                    } else {
-                        DBG(std::cerr << "[solve][step1] skip z1=" << z1
-                                      << " because dist_s[z1]=INF\n";);
+                    auto it_uv = find_dist(v, u);   // local_dist[v][u]
+                    if (it_uv.has_value()) {
+                        relax(v, du + *it_uv, pq, dist_a);
                     }
                 }
-            };
 
-            for (Vertex z2: ball[v]) {
-                relax_from_z2(z2);
-            }
-            relax_from_z2(v);
-        }
+                for (Vertex y : ball[v]) {
+                    const Distance dy = dist_a[y].load(std::memory_order_relaxed);
+                    if (dy == INF) continue;
 
-        // -------------------------
-        // Step 2
-        // -------------------------
-        for (Vertex x: bundle[u]) {
-            if (dist_s[x] >= INF) {
-                DBG(std::cerr << "[solve][step2] skip x=" << x
-                              << " because dist_s[x]=INF\n";);
-                continue;
-            }
+                    auto it_vy = find_dist(v, y);   // local_dist[v][y]
+                    if (it_vy.has_value()) {
+                        relax(v, dy + *it_vy, pq, dist_a);
+                    }
+                }
 
-            DBG(std::cerr << "[solve][step2] expand x=" << x
-                          << " dist_s[x]=" << dist_s[x]
-                          << " deg(x)=" << g.neighbors(x).size() << "\n";);
+                auto relax_from_z2 = [&](Vertex z2) {
+                    Distance dist_z2_to_v = 0;
+                    if (z2 != v) {
+                        auto it = find_dist(v, z2); // local_dist[v][z2]
+                        if (!it.has_value()) return;
+                        dist_z2_to_v = *it;
+                    }
 
-            for (const auto &edge: g.neighbors(x)) {
-                const Vertex y = edge.to;
-                const Distance through_x = dist_s[x] + edge.weight;
+                    for (const auto& edge : g.neighbors(z2)) {
+                        const Vertex z1 = edge.to;
+                        const Distance dz1 = dist_a[z1].load(std::memory_order_relaxed);
+                        if (dz1 == INF) continue;
 
-#ifndef NDEBUG
-                relax_count[y]++;
-#endif
-                DBG(std::cerr << "[solve][step2] x=" << x
-                              << " -> y=" << y
-                              << " w=" << edge.weight
-                              << " through_x=" << through_x
-                              << " dist_s[y]=" << dist_s[y] << "\n";);
+                        relax(v, dz1 + edge.weight + dist_z2_to_v, pq, dist_a);
+                    }
+                };
 
-                relax(y, through_x, pq);
+                for (Vertex z2 : ball[v]) relax_from_z2(z2);
+                relax_from_z2(v);
+            });
 
-                // Ball(y) is defined only when y not in R.
-                if (!R.count(y)) {
-                    DBG(std::cerr << "[solve][step2] y=" << y
-                                  << " not in R, ball[y].size()=" << ball[y].size() << "\n";);
+            // Step 2
+            parlay::parallel_for(0, owned.size(), [&](std::size_t j) {
+                const Vertex x = owned[j];
+                const Distance dx = dist_a[x].load(std::memory_order_relaxed);
+                if (dx == INF) return;
 
-                    for (Vertex z1: ball[y]) {
-                        auto it_yz1 = local_dist[y].find(z1);
-                        if (it_yz1 != local_dist[y].end()) {
-                            Distance cand = through_x + it_yz1->second;
-#ifndef NDEBUG
-                            relax_count[z1]++;
-#endif
-                            DBG(std::cerr << "[solve][step2] via ball(y): y=" << y
-                                          << " z1=" << z1
-                                          << " -> relax(" << z1 << ", " << cand << ")"
-                                          << " local_dist[" << y << "][" << z1 << "]="
-                                          << it_yz1->second << "\n";);
-                            relax(z1, cand, pq);
-                        } else {
-                            DBG(std::cerr << "[solve][step2] WARNING: missing local_dist["
-                                          << y << "][" << z1 << "]\n";);
+                for (const auto& edge : g.neighbors(x)) {
+                    const Vertex y = edge.to;
+                    const Distance through_x = dx + edge.weight;
+
+                    relax(y, through_x, pq, dist_a);
+
+                    if (!in_R[y]) {
+                        for (Vertex z1 : ball[y]) {
+                            auto it_yz1 = find_dist(y, z1); // local_dist[y][z1]
+                            if (it_yz1.has_value()) {
+                                relax(z1, through_x + *it_yz1, pq, dist_a);
+                            }
                         }
                     }
-                } else {
-                    DBG(std::cerr << "[solve][step2] y=" << y << " in R, skip ball(y)\n";);
                 }
-            }
-        }
+            });
+        });
     }
 
-#ifndef NDEBUG
-    DBG(std::cerr << "\n[solve] finished\n";);
-
-    size_t expanded_vertices = 0;
-    size_t repeated_pops = 0;
-    for (size_t i = 0; i < n; ++i) {
-        if (pop_count[i] > 0) expanded_vertices++;
-        if (pop_count[i] > 1) {
-            repeated_pops++;
-            std::cerr << "[solve] repeated pop vertex=" << i
-                      << " count=" << pop_count[i]
-                      << " final_dist=" << dist_s[i] << "\n";
-        }
-        if (relax_count[i] > 20) {
-            std::cerr << "[solve] high relax_count vertex=" << i
-                      << " count=" << relax_count[i]
-                      << " final_dist=" << dist_s[i] << "\n";
-        }
-    }
-
-    std::cerr << "[solve] expanded_vertices=" << expanded_vertices
-              << " repeated_pops=" << repeated_pops << "\n";
-#endif
-
-#undef DBG
+    parlay::parallel_for(0, n, [&](std::size_t i) {
+        dist[i] = dist_a[i].load(std::memory_order_relaxed);
+    });
 }
