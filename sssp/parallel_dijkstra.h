@@ -24,10 +24,6 @@ class Graph;
 
 class ParallelDijkstraSolver : public SSSPSolver {
 private:
-    using Bucket = std::size_t;
-    using SeqV = parlay::sequence<Vertex>;
-    using NestV = parlay::sequence<SeqV>;
-
     std::vector<Distance> dist;
 
 public:

@@ -7,65 +7,67 @@
 
 // CPSC 424. Adaptation of https://github.com/cmuparlay/parlaylib/blob/master/examples/bucketed_dijkstra.h
 // Assuming a *real positive integral weight*
-void ParallelDijkstraSolver::solve(const Graph& g, Vertex source) {
-    const auto n = static_cast<std::size_t>(g.num_vertices());
+//
+// Created by Jeremy Ng on 2/23/26.
+//
 
-    // Allocate space.
+#include "../graph.h"
+#include "../types.h"
+#include "../parallel_types.h"
+
+#include <atomic>
+#include <queue>
+#include <vector>
+
+void ParallelDijkstraSolver::solve(const Graph& g, Vertex source) {
+    const std::size_t n = static_cast<std::size_t>(g.num_vertices());
+
     dist.assign(n, INF);
 
-    parlay::sequence<std::atomic<Distance>> dist_a(n);
+    // Atomic distance array so parallel relaxations are safe.
+    DistSeq dist_a(n);
     parlay::parallel_for(0, n, [&](std::size_t i) {
         dist_a[i].store(INF, std::memory_order_relaxed);
     });
-    dist_a[source].store(static_cast<Distance>(0), std::memory_order_relaxed);
+    dist_a[source].store(0, std::memory_order_relaxed);
 
-    parlay::sequence<NestV> buckets(1);
-    buckets[0] = NestV(1, SeqV(1, source));
+    std::priority_queue<PQNode, std::vector<PQNode>, std::greater<>> pq;
+    pq.emplace(0, source);
 
-    Bucket max_bucket = 0;
-    for (Bucket b = 0; b <= max_bucket; ++b) {
-        auto frontier = parlay::filter(parlay::flatten(buckets[b]), [&](Vertex v) {
-            return dist_a[v].load(std::memory_order_relaxed) == static_cast<Distance>(b);
-        });
-        if (frontier.empty()) continue;
+    while (!pq.empty()) {
+        const auto [du, u] = pq.top();
+        pq.pop();
 
-        // Candidates are (bucket_index, vertex)
-        auto candidates = delayed::flatten(parlay::map(frontier, [&](Vertex u) {
-            const Distance du = dist_a[u].load(std::memory_order_relaxed);
-            return delayed::map(g.neighbors(u), [=](const Graph::Edge& e) {
-                const Distance nd = du + static_cast<Distance>(e.weight);
-                const auto k = static_cast<Bucket>(nd);
-                return std::pair<Bucket, Vertex>(k, e.to);
-            });
-        }));
+        // Standard stale-entry check.
+        if (du != dist_a[u].load(std::memory_order_relaxed)) continue;
 
-        // Keep only successful decreases (atomic)
-        auto kept = delayed::to_sequence(delayed::filter(candidates, [&](const auto& kv) {
-            const Bucket k = kv.first;
-            const Vertex v = kv.second;
-            const auto nd = static_cast<Distance>(k);
+        const auto& nbrs = g.neighbors(u);
+        const std::size_t m = nbrs.size();
 
-            return parlay::write_min(&dist_a[v], nd, std::less<Distance>());
-        }));
-        if (kept.empty()) continue;
+        // Mark whether each relaxation succeeded, and what to push.
+        parlay::sequence<uint8_t> improved(m, 0);
+        parlay::sequence<PQNode> updates(m);
 
-        const Bucket new_max = parlay::reduce(
-                delayed::map(kept, [](const auto& kv) { return kv.first; }),
-                parlay::maximum<Bucket>()
-        );
+        parlay::parallel_for(0, m, [&](std::size_t i) {
+            const auto& e = nbrs[i];
+            const Vertex v = e.to;
+            const Distance nd = du + static_cast<Distance>(e.weight);
 
-        if (new_max >= buckets.size()) buckets.resize(new_max + 1);
-
-        auto grouped = parlay::group_by_index(kept, new_max + 1);
-        parlay::parallel_for((Bucket)0, new_max + 1, [&](Bucket i) {
-            if (grouped[i].empty()) return;
-            buckets[i].push_back(std::move(grouped[i]));
+            if (parlay::write_min(&dist_a[v], nd, std::less<Distance>())) {
+                improved[i] = 1;
+                updates[i] = {nd, v};
+            }
         });
 
-        if (new_max > max_bucket) max_bucket = new_max;
+        // Sequentially push successful decreases.
+        for (std::size_t i = 0; i < m; ++i) {
+            if (improved[i]) {
+                pq.push(updates[i]);
+            }
+        }
     }
 
-    // Copy atomic results back into dist for the API
+    // Copy back to public API storage.
     parlay::parallel_for(0, n, [&](std::size_t i) {
         dist[i] = dist_a[i].load(std::memory_order_relaxed);
     });

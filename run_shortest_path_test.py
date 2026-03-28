@@ -158,8 +158,8 @@ def main():
     os.makedirs(f"{args.output}/{curr_time}")
     compile_cpp(rebuild=args.rebuild)
 
-    test_sizes = [10, 100, 1000]
-    algorithms = ["dijkstra", "bd", "parallel-bd", "rho-stepping"]
+    test_sizes = [10]
+    algorithms = ["dijkstra", "parallel-dijkstra", "bd", "parallel-bd", "rho-stepping"]
     all_passed = True
 
     # Iterate over all options
