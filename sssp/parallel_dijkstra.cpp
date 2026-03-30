@@ -15,7 +15,6 @@
 #include "../types.h"
 #include "../parallel_types.h"
 
-#include <atomic>
 #include <queue>
 #include <vector>
 

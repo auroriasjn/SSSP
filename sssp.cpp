@@ -10,12 +10,15 @@
 #include "benchmark/benchmark_solver.h"
 #include "benchmark/source_selector.h"
 #include "parser/parser.h"
+
 #include "sssp/sssp_solver.h"
 #include "sssp/dijkstra.h"
 #include "sssp/parallel_dijkstra.h"
 #include "sssp/parallel_bundle_dijkstra.h"
 #include "sssp/bundle_dijkstra.h"
 #include "sssp/rho_stepping.h"
+#include "sssp/bellman_ford.h"
+
 #include "graph.h"
 
 int main(int argc, char* argv[]) {
@@ -25,7 +28,7 @@ int main(int argc, char* argv[]) {
                                           "Options:\n"
                                           "\t-i  input file path (required)\n"
                                           "\t-o  output file path\n"
-                                          "\t-a  algorithm: [dijkstra] [parallel-dijkstra] [bd] [parallel-bd] [rho-stepping]\n"
+                                          "\t-a  algorithm: [dijkstra] [parallel-dijkstra] [bd] [parallel-bd] [rho-stepping] [bf]\n"
                                           "\t-w  weighted graph\n"
                                           "\t-v  verify result\n"
                                           "\t-n  number of sources to analyze\n";
@@ -133,6 +136,10 @@ int main(int argc, char* argv[]) {
     } else if (algorithm == "rho-stepping") {
         factory = []() {
             return std::make_unique<RhoSteppingSolver>();
+        };
+    } else if (algorithm == "bf") {
+        factory = []() {
+            return std::make_unique<BellmanFordSolver>();
         };
     } else {
         std::cerr << "Error: Unknown algorithm '" << algorithm << "'\n";

@@ -26,4 +26,7 @@ add_executable(SeniorThesis sssp.cpp
         utils.h
         sssp/parallel_bundle_dijkstra.cpp
         parallel_types.h
-        sssp/parallel_bundle_dijkstra.cpp)
+        sssp/parallel_bundle_dijkstra.cpp
+        sssp/bellman_ford.cpp
+        sssp/bellman_ford.h
+        sssp/bellman_ford.h)

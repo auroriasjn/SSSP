@@ -158,8 +158,8 @@ def main():
     os.makedirs(f"{args.output}/{curr_time}")
     compile_cpp(rebuild=args.rebuild)
 
-    test_sizes = [10]
-    algorithms = ["dijkstra", "parallel-dijkstra", "bd", "parallel-bd", "rho-stepping"]
+    test_sizes = [10, 100, 1000]
+    algorithms = ["dijkstra", "bf", "parallel-dijkstra", "bd", "parallel-bd", "rho-stepping"]
     all_passed = True
 
     # Iterate over all options
@@ -168,6 +168,7 @@ def main():
     # Get the graph statistics and write to a separate file
     num_vertices, num_edges = get_graph_statistics(args.input)
     with open(f"{args.output}/{curr_time}/graph_stats.txt", 'w') as f:
+        f.write(f"Name: {args.input}\n")
         f.write(f"Vertices: {num_vertices}\n")
         f.write(f"Edges: {num_edges}\n")
         f.write(f"Unweighted: {args.unweighted}\n")

@@ -25,6 +25,7 @@ namespace {
         return v == Vertex(-1);
     }
 }
+
 void BundleDijkstraSolver::construct(const Graph& g, Vertex source) {
     const size_t n = g.num_vertices();
 
@@ -123,7 +124,6 @@ void BundleDijkstraSolver::construct(const Graph& g, Vertex source) {
         }
 
         bool found_rep = false;
-
         for (Vertex u : extracted[v]) {
             if (R.count(u)) {
                 b[v] = u;
@@ -142,8 +142,6 @@ void BundleDijkstraSolver::construct(const Graph& g, Vertex source) {
     // Build Bundle(u) = { v in V \ R : b(v) = u }
     for (auto u : R) {
         bundle[u].clear();
-
-        // TODO: check
         bundle[u].push_back(u);
         b[u] = u;
     }

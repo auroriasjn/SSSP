@@ -24,6 +24,7 @@ SRCS := \
 	sssp/bundle_dijkstra.cpp \
 	sssp/parallel_bundle_dijkstra.cpp \
 	sssp/rho_stepping.cpp \
+	sssp/bellman_ford.cpp \
 	benchmark/source_selector.cpp \
 	benchmark/benchmark_solver.cpp \
 	parser/parser.cpp
