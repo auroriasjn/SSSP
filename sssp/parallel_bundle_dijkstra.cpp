@@ -7,11 +7,9 @@
 
 #include <cmath>
 #include <queue>
-#include <random>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <cassert>
 #include <iostream>
 
 #ifndef NDEBUG
@@ -68,9 +66,6 @@ void ParallelBundleDijkstraSolver::construct(const Graph& g, Vertex source) {
     bundle = NestV(n);
     b = VertexSeq(n, Vertex(-1));
     local_dist = NestDist(n);
-
-    dist.assign(n, INF);
-    dist[source] = 0;
 
     // Temporary per-vertex results from truncated Dijkstra
     NestV extracted(n);
@@ -219,20 +214,15 @@ void ParallelBundleDijkstraSolver::construct(const Graph& g, Vertex source) {
     });
 }
 
-void ParallelBundleDijkstraSolver::relax(
-        Vertex v,
-        Distance cand,
-        ArrayLaBPQ& pq,
-        DistSeq& dist_a
-) {
+void ParallelBundleDijkstraSolver::relax(Vertex v, Distance cand, ArrayLaBPQ& pq) {
     DBG(std::cerr << "[relax] enter v=" << v
                   << " cand=" << cand << "\n";);
 
-    Distance old = dist_a[v].load(std::memory_order_relaxed);
+    Distance old = dist[v].load(std::memory_order_relaxed);
     bool improved = false;
 
     while (cand < old) {
-        if (dist_a[v].compare_exchange_weak(
+        if (dist[v].compare_exchange_weak(
                 old, cand,
                 std::memory_order_acq_rel,
                 std::memory_order_relaxed)) {
@@ -265,22 +255,20 @@ void ParallelBundleDijkstraSolver::relax(
     const Distance rep_cand = cand + *dv_root;
 
     // Only keep this if your theory really justifies it.
-    relax(root, rep_cand, pq, dist_a);
+    relax(root, rep_cand, pq);
 }
 
 void ParallelBundleDijkstraSolver::solve(const Graph& g, Vertex source) {
     const std::size_t n = g.num_vertices();
     construct(g, source);
 
-    dist.assign(n, INF);
-
-    DistSeq dist_a(n);
+    dist = DistSeq(n);
     parlay::parallel_for(0, n, [&](std::size_t i) {
-        dist_a[i].store(INF, std::memory_order_relaxed);
+        dist[i].store(INF, std::memory_order_relaxed);
     });
-    dist_a[source].store(0, std::memory_order_relaxed);
+    dist[source].store(0, std::memory_order_relaxed);
 
-    ArrayLaBPQ pq(dist_a);
+    ArrayLaBPQ pq(dist);
     const std::size_t batch_size = get_k(n);
 
     // Match reference semantics: all representatives are active initially.
@@ -292,13 +280,14 @@ void ParallelBundleDijkstraSolver::solve(const Graph& g, Vertex source) {
         VertexSeq active = pq.active_vertices();
         if (active.empty()) break;
 
-        const Distance theta = pq.get_threshold(active, dist_a, batch_size);
+        // Only one thread can call this
+        const Distance theta = pq.get_threshold(active, dist, batch_size);
         VertexSeq frontier = pq.extract(theta);
         if (frontier.empty()) break;
 
         parlay::parallel_for(0, frontier.size(), [&](std::size_t i) {
             const Vertex u = frontier[i];
-            const Distance du = dist_a[u].load(std::memory_order_relaxed);
+            const Distance du = dist[u].load(std::memory_order_relaxed);
             if (du == INF) return;
 
             const VertexSeq& owned = bundle[u];
@@ -308,21 +297,21 @@ void ParallelBundleDijkstraSolver::solve(const Graph& g, Vertex source) {
                 const Vertex v = owned[j];
 
                 if (v == u) {
-                    relax(v, du, pq, dist_a);
+                    relax(v, du, pq);
                 } else {
                     auto it_uv = find_dist(v, u);   // local_dist[v][u]
                     if (it_uv.has_value()) {
-                        relax(v, du + *it_uv, pq, dist_a);
+                        relax(v, du + *it_uv, pq);
                     }
                 }
 
                 for (Vertex y : ball[v]) {
-                    const Distance dy = dist_a[y].load(std::memory_order_relaxed);
+                    const Distance dy = dist[y].load(std::memory_order_relaxed);
                     if (dy == INF) continue;
 
                     auto it_vy = find_dist(v, y);   // local_dist[v][y]
                     if (it_vy.has_value()) {
-                        relax(v, dy + *it_vy, pq, dist_a);
+                        relax(v, dy + *it_vy, pq);
                     }
                 }
 
@@ -336,10 +325,10 @@ void ParallelBundleDijkstraSolver::solve(const Graph& g, Vertex source) {
 
                     for (const auto& edge : g.neighbors(z2)) {
                         const Vertex z1 = edge.to;
-                        const Distance dz1 = dist_a[z1].load(std::memory_order_relaxed);
+                        const Distance dz1 = dist[z1].load(std::memory_order_relaxed);
                         if (dz1 == INF) continue;
 
-                        relax(v, dz1 + edge.weight + dist_z2_to_v, pq, dist_a);
+                        relax(v, dz1 + edge.weight + dist_z2_to_v, pq);
                     }
                 };
 
@@ -350,20 +339,20 @@ void ParallelBundleDijkstraSolver::solve(const Graph& g, Vertex source) {
             // Step 2
             parlay::parallel_for(0, owned.size(), [&](std::size_t j) {
                 const Vertex x = owned[j];
-                const Distance dx = dist_a[x].load(std::memory_order_relaxed);
+                const Distance dx = dist[x].load(std::memory_order_relaxed);
                 if (dx == INF) return;
 
                 for (const auto& edge : g.neighbors(x)) {
                     const Vertex y = edge.to;
                     const Distance through_x = dx + edge.weight;
 
-                    relax(y, through_x, pq, dist_a);
+                    relax(y, through_x, pq);
 
                     if (!in_R[y]) {
                         for (Vertex z1 : ball[y]) {
                             auto it_yz1 = find_dist(y, z1); // local_dist[y][z1]
                             if (it_yz1.has_value()) {
-                                relax(z1, through_x + *it_yz1, pq, dist_a);
+                                relax(z1, through_x + *it_yz1, pq);
                             }
                         }
                     }
@@ -371,8 +360,4 @@ void ParallelBundleDijkstraSolver::solve(const Graph& g, Vertex source) {
             });
         });
     }
-
-    parlay::parallel_for(0, n, [&](std::size_t i) {
-        dist[i] = dist_a[i].load(std::memory_order_relaxed);
-    });
 }

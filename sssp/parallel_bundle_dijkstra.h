@@ -25,7 +25,7 @@ private:
     using BoolSeq = parlay::sequence<bool>;
 
     // Final SSSP result
-    std::vector<Distance> dist;
+    DistSeq dist;
 
     // Bundle construction
     VertexSeq R_vertices;                 // compact list of representatives
@@ -42,17 +42,16 @@ public:
 
     void construct(const Graph& g, Vertex source);
 
-    void relax(
-            Vertex v,
-            Distance cand,
-            ArrayLaBPQ& pq,
-            DistSeq& dist_a
-    );
+    void relax(Vertex v, Distance cand, ArrayLaBPQ& pq);
 
     void solve(const Graph& g, Vertex source) override;
 
-    const std::vector<Distance>& distances() const override {
-        return dist;
+    Distance distance(Vertex v) const override {
+        return dist[v].load(std::memory_order_relaxed);
+    }
+
+    size_t num_vertices() const override {
+        return dist.size();
     }
 
     const char* name() const override {

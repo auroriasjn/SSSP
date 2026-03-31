@@ -36,8 +36,12 @@ public:
 
     void solve(const Graph& g, Vertex source) override;
 
-    const std::vector<Distance>& distances() const override {
-        return dist_s;
+    Distance distance(Vertex v) const override {
+        return dist_s[v];
+    }
+
+    std::size_t num_vertices() const override {
+        return dist_s.size();
     }
 
     const char* name() const override {

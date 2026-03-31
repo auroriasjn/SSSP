@@ -16,18 +16,18 @@ void RhoSteppingSolver::solve(const Graph& g, Vertex source) {
     const size_t n = g.num_vertices();
 
     // Authoritative tentative distances
-    DistSeq dist_a(n);
+    dist = DistSeq(n);
     parlay::parallel_for(0, n, [&](std::size_t i) {
-        dist_a[i].store(INF, std::memory_order_relaxed);
+        dist[i].store(INF, std::memory_order_relaxed);
     });
-    dist_a[source].store(static_cast<Distance>(0), std::memory_order_relaxed);
+    dist[source].store(static_cast<Distance>(0), std::memory_order_relaxed);
 
     // Array-based LaB-PQ
-    ArrayLaBPQ pq(dist_a);
+    ArrayLaBPQ pq(dist);
     pq.update(source);
 
     DBG(std::cerr << "INF = " << INF << "\n";);
-    DBG(std::cerr << "dist[source] = " << dist_a[source].load() << "\n";);
+    DBG(std::cerr << "dist[source] = " << dist[source].load() << "\n";);
 
     while (!pq.empty()) {
         // Snapshot current active records
@@ -38,7 +38,7 @@ void RhoSteppingSolver::solve(const Graph& g, Vertex source) {
         }
 
         // Compute rho-threshold from current active frontier
-        Distance theta = pq.get_threshold(active, dist_a, rho_);
+        Distance theta = pq.get_threshold(active, dist, rho_);
         DBG(std::cerr << "[solve] Current threshold: " << theta << "\n";);
 
         // Extract everything with key <= theta
@@ -61,7 +61,7 @@ void RhoSteppingSolver::solve(const Graph& g, Vertex source) {
 
         parlay::parallel_for(0, frontier.size(), [&](std::size_t i) {
             Vertex u = frontier[i];
-            Distance du = dist_a[u].load(std::memory_order_relaxed);
+            Distance du = dist[u].load(std::memory_order_relaxed);
 
             if (du == INF) {
                 DBG(std::cerr << "[solve] [parallel-for] infinite distance detected at vertex " << u << "\n";);
@@ -74,16 +74,10 @@ void RhoSteppingSolver::solve(const Graph& g, Vertex source) {
                 Vertex v = e.to;
                 Distance nd = du + e.weight;
 
-                if (write_min(dist_a[v], nd)) {
+                if (write_min(dist[v], nd)) {
                     pq.update(v);
                 }
             });
         });
     }
-
-    // Copy out final distances for the solver API
-    dist.assign(n, INF);
-    parlay::parallel_for(0, n, [&](std::size_t i) {
-        dist[i] = dist_a[i].load(std::memory_order_relaxed);
-    });
 }

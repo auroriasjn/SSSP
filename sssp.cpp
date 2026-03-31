@@ -107,8 +107,7 @@ int main(int argc, char* argv[]) {
     // ---------------------------
     // Load Graph
     // ---------------------------
-    Parser parser;
-    Graph g = parser.parse(in_file, weighted);
+    Graph g = Parser::parse(in_file, weighted);
 
     auto sources = SourceSelector::random_subset(g, 100);
     // ---------------------------

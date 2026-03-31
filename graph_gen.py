@@ -65,6 +65,7 @@ class GraphGen:
         with open(fl_name, "w") as file:
             for u, v in zip(rows, cols):
                 file.write(f"+ {u} {v} {adj[u, v]}\n")
+        print(f"Graph generation finished for {n} vertices.")
 
 def main():
     parser = argparse.ArgumentParser(

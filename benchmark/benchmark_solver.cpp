@@ -10,8 +10,7 @@
 Graph BenchmarkRunner::preprocess(const std::string& file_name, bool weighted) {
     auto start = std::chrono::high_resolution_clock::now();
 
-    Parser parser;
-    Graph g = parser.parse(file_name, weighted);
+    Graph g = Parser::parse(file_name, weighted);
 
     auto end = std::chrono::high_resolution_clock::now();
     std::cout << "Graph load time: "
@@ -25,7 +24,7 @@ void BenchmarkRunner::run(
         const std::string& in_file,
         const std::string& out_file,
         const SolverFactory& factory,
-        const std::vector<Vertex>& sources,
+        const VertexList& sources,
         bool weighted,
         bool verify
 ) {
@@ -44,7 +43,7 @@ void BenchmarkRunner::run(
         write_result(*solver, out_file, ext_source, elapsed);
 
         if (verify) {
-            SSSPVerifier::verify(g, source, solver->distances(), out_file);
+            SSSPVerifier::verify(g, source, *solver, out_file);
         }
     }
 }

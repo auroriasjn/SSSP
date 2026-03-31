@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <limits>
 #include <vector>
+#include <array>
 
 #include <parlay/primitives.h>
 #include <parlay/sequence.h>
@@ -19,35 +20,41 @@
 #define DBG(x) do {} while (0)
 #endif
 
+// Let's see if this is slightly quicker.
 class ArrayLaBPQ {
 private:
-    DistSeq* delta_;                          // authoritative distances
-    parlay::sequence<std::atomic<bool>> in_q_;   // membership flags
-    std::atomic<std::size_t> active_count_{0};
+    DistSeq* delta_;
+    parlay::sequence<std::atomic<bool>> in_q_;
+
+    parlay::sequence<Vertex> active_;
+    std::atomic<std::size_t> active_size_{0};
 
     uint32_t seed_ = 0;
 
 public:
     explicit ArrayLaBPQ(DistSeq& delta)
-            : delta_(&delta), in_q_(delta.size()) {
+            : delta_(&delta),
+              in_q_(delta.size()),
+              active_(delta.size()) {
         parlay::parallel_for(0, in_q_.size(), [&](std::size_t i) {
             in_q_[i].store(false, std::memory_order_relaxed);
         });
     }
 
     void clear() {
-        parlay::parallel_for(0, in_q_.size(), [&](std::size_t i) {
-            in_q_[i].store(false, std::memory_order_relaxed);
+        std::size_t sz = active_size_.load(std::memory_order_acquire);
+        parlay::parallel_for(0, sz, [&](std::size_t i) {
+            in_q_[active_[i]].store(false, std::memory_order_relaxed);
         });
-        active_count_.store(0, std::memory_order_relaxed);
+        active_size_.store(0, std::memory_order_release);
     }
 
     bool empty() const {
-        return active_count_.load(std::memory_order_acquire) == 0;
+        return active_size_.load(std::memory_order_acquire) == 0;
     }
 
     std::size_t size() const {
-        return active_count_.load(std::memory_order_acquire);
+        return active_size_.load(std::memory_order_acquire);
     }
 
     void update(Vertex v) {
@@ -56,43 +63,42 @@ public:
                 expected, true,
                 std::memory_order_acq_rel,
                 std::memory_order_relaxed)) {
-            active_count_.fetch_add(1, std::memory_order_acq_rel);
-            DBG(std::cerr << "[LaB-PQ] updating vertex " << v << std::endl;);
+            std::size_t pos = active_size_.fetch_add(1, std::memory_order_acq_rel);
+            active_[pos] = v;
         }
     }
 
-    // Returns and removes all active vertices with delta[v] <= theta.
     VertexSeq extract(Distance theta) {
-        auto ids = parlay::tabulate(in_q_.size(), [](std::size_t i) {
-            return static_cast<Vertex>(i);
+        std::size_t sz = active_size_.load(std::memory_order_acquire);
+
+        auto candidates = parlay::tabulate(sz, [&](std::size_t i) {
+            return active_[i];
         });
 
-        auto out = parlay::filter(ids, [&](Vertex v) {
-            if (!in_q_[v].load(std::memory_order_acquire)) return false;
-            Distance dv = (*delta_)[v].load(std::memory_order_relaxed);
-            return dv <= theta;
+        auto ready = parlay::filter(candidates, [&](Vertex v) {
+            return (*delta_)[v].load(std::memory_order_relaxed) <= theta;
         });
 
-        parlay::parallel_for(0, out.size(), [&](std::size_t i) {
-            Vertex v = out[i];
-            bool was_present = in_q_[v].exchange(false, std::memory_order_acq_rel);
-            if (was_present) {
-                active_count_.fetch_sub(1, std::memory_order_acq_rel);
-            }
+        auto deferred = parlay::filter(candidates, [&](Vertex v) {
+            return (*delta_)[v].load(std::memory_order_relaxed) > theta;
         });
 
-        return out;
+        parlay::parallel_for(0, ready.size(), [&](std::size_t i) {
+            in_q_[ready[i]].store(false, std::memory_order_release);
+        });
+
+        parlay::parallel_for(0, deferred.size(), [&](std::size_t i) {
+            active_[i] = deferred[i];
+        });
+
+        active_size_.store(deferred.size(), std::memory_order_release);
+        return ready;
     }
 
-
-    // Snapshot all currently active vertices without removing them.
     VertexSeq active_vertices() const {
-        auto ids = parlay::tabulate(in_q_.size(), [](std::size_t i) {
-            return static_cast<Vertex>(i);
-        });
-
-        return parlay::filter(ids, [&](Vertex v) {
-            return in_q_[v].load(std::memory_order_acquire);
+        std::size_t sz = active_size_.load(std::memory_order_acquire);
+        return parlay::tabulate(sz, [&](std::size_t i) {
+            return active_[i];
         });
     }
 

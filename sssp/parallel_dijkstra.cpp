@@ -19,16 +19,14 @@
 #include <vector>
 
 void ParallelDijkstraSolver::solve(const Graph& g, Vertex source) {
-    const std::size_t n = static_cast<std::size_t>(g.num_vertices());
-
-    dist.assign(n, INF);
+    const auto n = g.num_vertices();
 
     // Atomic distance array so parallel relaxations are safe.
-    DistSeq dist_a(n);
+    dist = DistSeq(n);
     parlay::parallel_for(0, n, [&](std::size_t i) {
-        dist_a[i].store(INF, std::memory_order_relaxed);
+        dist[i].store(INF, std::memory_order_relaxed);
     });
-    dist_a[source].store(0, std::memory_order_relaxed);
+    dist[source].store(0, std::memory_order_relaxed);
 
     std::priority_queue<PQNode, std::vector<PQNode>, std::greater<>> pq;
     pq.emplace(0, source);
@@ -38,7 +36,7 @@ void ParallelDijkstraSolver::solve(const Graph& g, Vertex source) {
         pq.pop();
 
         // Standard stale-entry check.
-        if (du != dist_a[u].load(std::memory_order_relaxed)) continue;
+        if (du != dist[u].load(std::memory_order_relaxed)) continue;
 
         const auto& nbrs = g.neighbors(u);
         const std::size_t m = nbrs.size();
@@ -52,7 +50,7 @@ void ParallelDijkstraSolver::solve(const Graph& g, Vertex source) {
             const Vertex v = e.to;
             const Distance nd = du + static_cast<Distance>(e.weight);
 
-            if (parlay::write_min(&dist_a[v], nd, std::less<Distance>())) {
+            if (parlay::write_min(&dist[v], nd, std::less<Distance>())) {
                 improved[i] = 1;
                 updates[i] = {nd, v};
             }
@@ -65,9 +63,4 @@ void ParallelDijkstraSolver::solve(const Graph& g, Vertex source) {
             }
         }
     }
-
-    // Copy back to public API storage.
-    parlay::parallel_for(0, n, [&](std::size_t i) {
-        dist[i] = dist_a[i].load(std::memory_order_relaxed);
-    });
 }

@@ -23,7 +23,7 @@ class Graph;
 
 class RhoSteppingSolver : public SSSPSolver {
 private:
-    std::vector<Distance> dist;
+    DistSeq dist;
     std::size_t rho_ = 1 << 20;
     uint32_t seed_ = 0;
 
@@ -32,12 +32,16 @@ public:
 
     void solve(const Graph& g, Vertex source) override;
 
-    const char* name() const override {
-        return "Rho Stepping";
+    Distance distance(Vertex v) const override {
+        return dist[v].load(std::memory_order_relaxed);
     }
 
-    const std::vector<Distance>& distances() const override {
-        return dist;
+    size_t num_vertices() const override {
+        return dist.size();
+    }
+
+    const char* name() const override {
+        return "Rho Stepping";
     }
 };
 

@@ -1,14 +1,13 @@
-//
-// Created by Jeremy Ng on 2/23/26.
-//
-
 #ifndef SENIORTHESIS_SSSP_VERIFIER_H
 #define SENIORTHESIS_SSSP_VERIFIER_H
 
 #include <cassert>
-#include <iostream>
 #include <chrono>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
 #include <memory>
+#include <string>
 
 #include "../graph.h"
 #include "sssp_solver.h"
@@ -19,7 +18,7 @@ public:
     static void verify(
             const Graph& g,
             Vertex source,
-            const std::vector<Distance>& candidate_dist,
+            const SSSPSolver& candidate,
             const std::string& out_file
     ) {
         std::ostream* out = &std::cerr;
@@ -37,7 +36,6 @@ public:
 
         using clock = std::chrono::high_resolution_clock;
 
-        // Reference solver
         DijkstraSolver reference;
 
         auto start = clock::now();
@@ -48,36 +46,33 @@ public:
                 std::chrono::duration<double>(end - start).count();
 
         (*out) << "  Reference Dijkstra time: "
-                  << elapsed << " sec\n";
+               << elapsed << " sec\n";
 
-        const auto& expected = reference.distances();
+        const size_t n = reference.num_vertices();
+        assert(n == candidate.num_vertices());
 
-        assert(expected.size() == candidate_dist.size());
-
-        size_t n = expected.size();
         size_t mismatch_count = 0;
 
         for (size_t i = 0; i < n; ++i) {
-            if (expected[i] != candidate_dist[i]) {
-                (*out)
-                        << "  Mismatch at vertex " << i
-                        << " | expected: " << expected[i]
-                        << " | actual: " << candidate_dist[i]
-                        << "\n";
+            const Distance expected = reference.distance(static_cast<Vertex>(i));
+            const Distance actual = candidate.distance(static_cast<Vertex>(i));
 
+            if (expected != actual) {
+                (*out) << "  Mismatch at vertex " << i
+                       << " | expected: " << expected
+                       << " | actual: " << actual
+                       << "\n";
                 mismatch_count++;
             }
         }
 
         if (mismatch_count > 0) {
             (*out) << "Total mismatches: "
-                      << mismatch_count << "\n";
+                   << mismatch_count << "\n";
         }
 
-        assert(mismatch_count == 0 &&
-               "SSSP verification failed");
-
+        assert(mismatch_count == 0 && "SSSP verification failed");
     }
 };
 
-#endif //SENIORTHESIS_SSSP_VERIFIER_H
+#endif // SENIORTHESIS_SSSP_VERIFIER_H

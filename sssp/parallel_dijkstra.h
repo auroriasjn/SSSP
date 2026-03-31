@@ -17,6 +17,7 @@
 #include <parlay/delayed.h>
 
 #include "sssp_solver.h"
+#include "../parallel_types.h"
 
 namespace delayed = parlay::delayed;
 
@@ -24,12 +25,17 @@ class Graph;
 
 class ParallelDijkstraSolver : public SSSPSolver {
 private:
-    std::vector<Distance> dist;
+    DistSeq dist;
 
 public:
     void solve(const Graph& g, Vertex source) override;
-    const std::vector<Distance>& distances() const override {
-        return dist;
+
+    Distance distance(Vertex v) const override {
+        return dist[v].load(std::memory_order_relaxed);
+    }
+
+    size_t num_vertices() const override {
+        return dist.size();
     }
 
     const char* name() const override {

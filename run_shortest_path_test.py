@@ -10,6 +10,9 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional
 
+from graph_gen import GraphGen
+
+
 TIME_PATTERN = re.compile(r"Time:\s*([0-9]*\.?[0-9]+)\s*sec", re.IGNORECASE)
 MISMATCH_PATTERN = re.compile(r"Total mismatches:\s*(\d+)", re.IGNORECASE)
 
@@ -72,7 +75,7 @@ def get_graph_statistics(input_file: str):
 
 def run_cpp_executable(
         N: int,
-        input_file: str = 'data/usa_batch',
+        input_file: Optional[str] = None,
         output_file: str = 'output/output.txt',
         executable: str = "build/sssp_solver",
         algorithm: str = "dijkstra",
@@ -81,6 +84,19 @@ def run_cpp_executable(
     """
     Pack the data in binary (N as int64) and run the C++ executable.
     """
+    if input_file is None:
+        # Use graph generation module
+        folder = output_file.split('/')[0]
+        input_file = f"{folder}/{N}.txt"
+
+        if not os.path.isfile(input_file):
+            graph_gen = GraphGen(
+                symmetrized=True,
+                weighted=not unweighted,
+                dense=False
+            )
+            graph_gen.write(n=N, output_folder=folder)
+
     args = [executable,
             "-i", input_file,
             "-o", output_file,
@@ -107,7 +123,7 @@ def main():
 
     parser.add_argument(
         "-i", "--input",
-        default='data/usa_batch',
+        default=None,
         help="Input file for SSSP executable"
     )
 
@@ -158,20 +174,26 @@ def main():
     os.makedirs(f"{args.output}/{curr_time}")
     compile_cpp(rebuild=args.rebuild)
 
-    test_sizes = [10, 100, 1000]
     algorithms = ["dijkstra", "bf", "parallel-dijkstra", "bd", "parallel-bd", "rho-stepping"]
     all_passed = True
 
-    # Iterate over all options
-    print(f"Analyzing {args.input}...")
+    if args.input is not None:
+        # Iterate over all options
+        print(f"Analyzing {args.input}...")
 
-    # Get the graph statistics and write to a separate file
-    num_vertices, num_edges = get_graph_statistics(args.input)
-    with open(f"{args.output}/{curr_time}/graph_stats.txt", 'w') as f:
-        f.write(f"Name: {args.input}\n")
-        f.write(f"Vertices: {num_vertices}\n")
-        f.write(f"Edges: {num_edges}\n")
-        f.write(f"Unweighted: {args.unweighted}\n")
+        # Get the graph statistics and write to a separate file
+        num_vertices, num_edges = get_graph_statistics(args.input)
+        with open(f"{args.output}/{curr_time}/graph_stats.txt", 'w') as f:
+            f.write(f"Name: {args.input}\n")
+            f.write(f"Vertices: {num_vertices}\n")
+            f.write(f"Edges: {num_edges}\n")
+            f.write(f"Unweighted: {args.unweighted}\n")
+
+        # We only care about looking at one source vertex honestly for this, going off of Dong et al. (2021)
+        test_sizes = [1]
+    else:
+        print("Generating graphs with preset test sizes...")
+        test_sizes = [10, 100, 1000, 10000]
 
     for a in algorithms:
         print(f"===============\n{a}\n===============")
