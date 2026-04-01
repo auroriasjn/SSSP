@@ -18,6 +18,7 @@ class BundleDijkstraSolver : public SSSPSolver {
 private:
     // Final SSSP result
     std::vector<Distance> dist_s;
+    std::vector<size_t> reinsertions;
 
     // Bundle construction
     VertexSet R;
@@ -46,6 +47,10 @@ public:
 
     const char* name() const override {
         return "Bundle Dijkstra";
+    }
+
+    size_t reinserts(Vertex v) const override {
+        return reinsertions[v];
     }
 };
 

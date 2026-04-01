@@ -26,6 +26,7 @@ private:
 
     // Final SSSP result
     DistSeq dist;
+    SizeSeq reinsertions;
 
     // Bundle construction
     VertexSeq R_vertices;                 // compact list of representatives
@@ -50,6 +51,10 @@ public:
         return dist[v].load(std::memory_order_relaxed);
     }
 
+    size_t reinserts(Vertex v) const override {
+        return reinsertions[v].load(std::memory_order_relaxed);;
+    }
+
     size_t num_vertices() const override {
         return dist.size();
     }
@@ -59,10 +64,17 @@ public:
     }
 
     std::optional<Distance> find_dist(Vertex from, Vertex to) const {
-        for (const auto& [u, d] : local_dist[from]) {
-            if (u == to) {
-                return d;
-            }
+        const auto& seq = local_dist[from];
+
+        auto it = std::lower_bound(
+                seq.begin(), seq.end(), to,
+                [](const DistPair& p, Vertex value) {
+                    return p.first < value;
+                }
+        );
+
+        if (it != seq.end() && it->first == to) {
+            return it->second;
         }
         return std::nullopt;
     }

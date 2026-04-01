@@ -193,7 +193,7 @@ def main():
         test_sizes = [1]
     else:
         print("Generating graphs with preset test sizes...")
-        test_sizes = [10, 100, 1000, 10000]
+        test_sizes = [10, 50, 100, 500, 1000, 5000, 10000]
 
     for a in algorithms:
         print(f"===============\n{a}\n===============")

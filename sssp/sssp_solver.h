@@ -18,6 +18,9 @@ public:
 
     // Optional: solver name for benchmarking output
     virtual const char* name() const = 0;
+
+    // Relaxations
+    virtual size_t reinserts(Vertex v) const = 0;
 };
 
 #endif

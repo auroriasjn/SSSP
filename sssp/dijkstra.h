@@ -18,6 +18,8 @@ class DijkstraSolver : public SSSPSolver {
 
 private:
     std::vector<Distance> dist;
+    std::vector<std::size_t> reinsertions;
+
 public:
     void solve(const Graph& g, Vertex source) override;
 
@@ -31,6 +33,10 @@ public:
 
     const char* name() const override {
         return "Dijkstra";
+    }
+
+    std::size_t reinserts(Vertex v) const override {
+        return reinsertions[v];
     }
 };
 

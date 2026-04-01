@@ -14,6 +14,8 @@ class BellmanFordSolver : public SSSPSolver {
 
 private:
     std::vector<Distance> dist;
+    std::vector<size_t> reinsertions;
+
 public:
     void solve(const Graph& g, Vertex source) override;
 
@@ -27,6 +29,10 @@ public:
 
     const char* name() const override {
         return "Bellman-Ford";
+    }
+
+    size_t reinserts(Vertex v) const override {
+        return reinsertions[v];
     }
 };
 

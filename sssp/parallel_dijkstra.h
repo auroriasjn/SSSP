@@ -26,12 +26,17 @@ class Graph;
 class ParallelDijkstraSolver : public SSSPSolver {
 private:
     DistSeq dist;
+    SizeSeq reinsertions;
 
 public:
     void solve(const Graph& g, Vertex source) override;
 
     Distance distance(Vertex v) const override {
         return dist[v].load(std::memory_order_relaxed);
+    }
+
+    size_t reinserts(Vertex v) const override {
+        return reinsertions[v].load(std::memory_order_relaxed);;
     }
 
     size_t num_vertices() const override {

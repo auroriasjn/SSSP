@@ -109,7 +109,7 @@ int main(int argc, char* argv[]) {
     // ---------------------------
     Graph g = Parser::parse(in_file, weighted);
 
-    auto sources = SourceSelector::random_subset(g, 100);
+    auto sources = SourceSelector::random_subset(g, n);
     // ---------------------------
     // Solver Factory
     // ---------------------------

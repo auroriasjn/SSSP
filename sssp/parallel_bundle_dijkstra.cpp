@@ -18,6 +18,21 @@
 #define DBG(x) do {} while (0)
 #endif
 
+#ifndef NDEBUG
+#define TIME_BLOCK(name, code)                                  \
+    do {                                                        \
+        auto _start = std::chrono::high_resolution_clock::now();\
+        code;                                                   \
+        auto _end = std::chrono::high_resolution_clock::now();  \
+        double _elapsed =                                       \
+            std::chrono::duration<double>(_end - _start).count();\
+        std::cerr << "[TIMER] " << name << ": " << _elapsed     \
+                  << " seconds\n";                              \
+    } while (0)
+#else
+#define TIME_BLOCK(name, code) code
+#endif
+
 namespace {
     inline bool is_invalid_vertex(Vertex v) {
         return v == Vertex(-1);
@@ -168,7 +183,6 @@ void ParallelBundleDijkstraSolver::construct(const Graph& g, Vertex source) {
         VertexList bv;
         std::vector<std::pair<Vertex, Distance>> ldv;
 
-        bool found_rep = false;
         for (size_t j = 0; j < ext.size(); ++j) {
             Vertex u = ext[j];
             Distance du = td[j].second;
@@ -176,7 +190,6 @@ void ParallelBundleDijkstraSolver::construct(const Graph& g, Vertex source) {
             if (in_R[u]) {
                 b[v] = u;
                 ldv.emplace_back(u, du);
-                found_rep = true;
                 break;
             }
 
@@ -185,6 +198,11 @@ void ParallelBundleDijkstraSolver::construct(const Graph& g, Vertex source) {
         }
         ball[v] = VertexSeq(bv.begin(), bv.end());
         local_dist[v] = DistMapSeq(ldv.begin(), ldv.end());
+
+        std::sort(local_dist[v].begin(), local_dist[v].end(),
+                  [](const DistPair& a, const DistPair& b) {
+                      return a.first < b.first;
+                  });
     });
 
     // ---- Phase 5: build bundle(u) = {u} ∪ {v notin R : b(v)=u} ----
@@ -260,7 +278,9 @@ void ParallelBundleDijkstraSolver::relax(Vertex v, Distance cand, ArrayLaBPQ& pq
 
 void ParallelBundleDijkstraSolver::solve(const Graph& g, Vertex source) {
     const std::size_t n = g.num_vertices();
-    construct(g, source);
+    //construct(g, source);
+
+    TIME_BLOCK("construct", construct(g, source));
 
     dist = DistSeq(n);
     parlay::parallel_for(0, n, [&](std::size_t i) {
@@ -285,6 +305,7 @@ void ParallelBundleDijkstraSolver::solve(const Graph& g, Vertex source) {
         VertexSeq frontier = pq.extract(theta);
         if (frontier.empty()) break;
 
+        // No update happens concurrently to extract...
         parlay::parallel_for(0, frontier.size(), [&](std::size_t i) {
             const Vertex u = frontier[i];
             const Distance du = dist[u].load(std::memory_order_relaxed);

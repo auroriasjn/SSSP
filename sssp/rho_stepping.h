@@ -24,6 +24,8 @@ class Graph;
 class RhoSteppingSolver : public SSSPSolver {
 private:
     DistSeq dist;
+    SizeSeq reinsertions;
+
     std::size_t rho_ = 1 << 20;
     uint32_t seed_ = 0;
 
@@ -34,6 +36,10 @@ public:
 
     Distance distance(Vertex v) const override {
         return dist[v].load(std::memory_order_relaxed);
+    }
+
+    size_t reinserts(Vertex v) const override {
+        return reinsertions[v].load(std::memory_order_relaxed);;
     }
 
     size_t num_vertices() const override {

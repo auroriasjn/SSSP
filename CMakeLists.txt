@@ -19,9 +19,7 @@ add_executable(SeniorThesis sssp.cpp
         types.h
         sssp/parallel_bundle_dijkstra.cpp
         sssp/parallel_bundle_dijkstra.h
-        labpq/labpq.cpp
         labpq/labpq.h
-        labpq/array_labpq.cpp
         labpq/array_labpq.h
         utils.h
         sssp/parallel_bundle_dijkstra.cpp
@@ -30,4 +28,6 @@ add_executable(SeniorThesis sssp.cpp
         sssp/bellman_ford.cpp
         sssp/bellman_ford.h
         sssp/bellman_ford.h
+        sssp/parallel_bundle_dijkstra.cpp
+        sssp/parallel_bundle_dijkstra.cpp
         sssp/parallel_bundle_dijkstra.cpp)

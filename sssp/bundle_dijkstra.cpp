@@ -26,6 +26,7 @@ namespace {
     }
 }
 
+// THIS IS FOR UNDIRECTED GRAPHS ONLY
 void BundleDijkstraSolver::construct(const Graph& g, Vertex source) {
     const size_t n = g.num_vertices();
 
