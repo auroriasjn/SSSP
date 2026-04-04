@@ -4,6 +4,8 @@
 
 void DijkstraSolver::solve(const Graph& g, Vertex source) {
     dist.assign(g.num_vertices(), INF);
+    reinsertions.assign(g.num_vertices(), 0);
+
     dist[source] = 0.0;
 
     std::priority_queue<PQNode, std::vector<PQNode>, std::greater<>> pq;
@@ -20,7 +22,13 @@ void DijkstraSolver::solve(const Graph& g, Vertex source) {
             auto w = edge.weight;
 
             auto nd = du + w;
+
             if (nd < dist[v]) {
+                // Count reinsertion ONLY if v was already discovered before
+                if (dist[v] != INF) {
+                    reinsertions[v]++;
+                }
+
                 dist[v] = nd;
                 pq.emplace(nd, v);
             }

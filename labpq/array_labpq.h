@@ -8,6 +8,7 @@
 
 #include <parlay/primitives.h>
 #include <parlay/sequence.h>
+#include <parlay/delayed_sequence.h> // Ensure delayed_sequence is included
 
 #include "../parallel_types.h"
 #include "../graph.h"
@@ -20,7 +21,6 @@
 #define DBG(x) do {} while (0)
 #endif
 
-// Let's see if this is slightly quicker.
 class ArrayLaBPQ {
 private:
     DistSeq* delta_;
@@ -71,10 +71,16 @@ public:
     VertexSeq extract(Distance theta) {
         std::size_t sz = active_size_.load(std::memory_order_acquire);
 
-        auto candidates = parlay::tabulate(sz, [&](std::size_t i) {
+        // OPTIMIZATION: Fast path out for empty queue
+        if (sz == 0) return {};
+
+        // OPTIMIZATION: delayed_tabulate creates a lazy view,
+        // avoiding a full materialization (allocation) of the candidates array.
+        auto candidates = parlay::delayed_tabulate(sz, [&](std::size_t i) {
             return active_[i];
         });
 
+        // The filters now evaluate the delayed sequence on the fly
         auto ready = parlay::filter(candidates, [&](Vertex v) {
             return (*delta_)[v].load(std::memory_order_relaxed) <= theta;
         });
@@ -132,7 +138,10 @@ public:
         );
         if (id > SSSP_SAMPLES) id = SSSP_SAMPLES;
 
-        std::sort(sample_dist.begin(), sample_dist.end());
+        // OPTIMIZATION: nth_element does O(N) partitioning instead of O(N log N) full sort.
+        // It guarantees the element at `id` is the same as if the array were fully sorted.
+        std::nth_element(sample_dist.begin(), sample_dist.begin() + id, sample_dist.end());
+
         return sample_dist[id];
     }
 };

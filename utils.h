@@ -26,6 +26,22 @@ inline bool write_min(std::atomic<T>& a, T b) {
 }
 
 template <typename T>
+inline bool write_min_old(std::atomic<T>& a, T b, T& old_val) {
+    T cur = a.load(std::memory_order_relaxed);
+    while (b < cur) {
+        if (a.compare_exchange_weak(
+                cur, b,
+                std::memory_order_acq_rel,
+                std::memory_order_relaxed)) {
+            old_val = cur;
+            return true;
+        }
+    }
+    old_val = cur;
+    return false;
+}
+
+template <typename T>
 inline bool write_max(std::atomic<T>& a, T b) {
     T cur = a.load(std::memory_order_relaxed);
     while (cur < b) {

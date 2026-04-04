@@ -42,13 +42,10 @@ Graph Parser::parse(const std::string& file_name, const bool weighted) {
             auto [p3, ec3] = std::from_chars(ptr, ptr + line.size(), w);
             if (ec3 != std::errc()) continue;
 
-            // Bundle Dijkstra and Rho Stepping only works with undirected graphs
             graph.add_edge(u, v, w);
-            graph.add_edge(v, u, w);
         } else {
             // Unweighted edge add
             graph.add_edge(u, v, 1.0);
-            graph.add_edge(v, u, 1.0);
         }
     }
 

@@ -16,17 +16,18 @@
 #include <parlay/primitives.h>
 #include <parlay/sequence.h>
 
+#include "../types.h"
 #include "../parallel_types.h"
 #include "../labpq/array_labpq.h"
 #include "sssp_solver.h"
 
 class ParallelBundleDijkstraSolver : public SSSPSolver {
 private:
-    using BoolSeq = parlay::sequence<bool>;
-
     // Final SSSP result
     DistSeq dist;
     SizeSeq reinsertions;
+    SizeSeq successful_relax_per_vertex;
+    SizeSeq recursive_root_hits;
 
     // Bundle construction
     VertexSeq R_vertices;                 // compact list of representatives
@@ -66,15 +67,12 @@ public:
     std::optional<Distance> find_dist(Vertex from, Vertex to) const {
         const auto& seq = local_dist[from];
 
-        auto it = std::lower_bound(
-                seq.begin(), seq.end(), to,
-                [](const DistPair& p, Vertex value) {
-                    return p.first < value;
-                }
-        );
-
-        if (it != seq.end() && it->first == to) {
-            return it->second;
+        // local_dist[from] is usually tiny (bounded by truncated search depth),
+        // so linear scan is often faster than sorting + lower_bound.
+        for (const auto& [u, d] : seq) {
+            if (u == to) {
+                return d;
+            }
         }
         return std::nullopt;
     }

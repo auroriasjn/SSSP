@@ -108,6 +108,10 @@ def run_cpp_executable(
 
     subprocess.run(args, stdout=subprocess.DEVNULL)
 
+    # Runtime Error for OOM
+    if not os.path.exists(output_file):
+        raise RuntimeError(f"Solver did not produce output file: {output_file}")
+
     # Parsing the final output
     with open(output_file) as f:
         output = f.read()
@@ -175,6 +179,7 @@ def main():
     compile_cpp(rebuild=args.rebuild)
 
     algorithms = ["dijkstra", "bf", "parallel-dijkstra", "bd", "parallel-bd", "rho-stepping"]
+    # algorithms = ["dijkstra", "bf", "bd", "rho-stepping"]
     all_passed = True
 
     if args.input is not None:
